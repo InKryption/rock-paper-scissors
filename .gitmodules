@@ -1,0 +1,6 @@
+[submodule "dep/MasterQ32/zig-network"]
+	path = dep/MasterQ32/zig-network
+	url = https://github.com/MasterQ32/zig-network.git
+[submodule "dep/MasterQ32/zig-args"]
+	path = dep/MasterQ32/zig-args
+	url = https://github.com/MasterQ32/zig-args.git
