@@ -29,17 +29,31 @@ pub fn main() !void {
     try host_socket.bindToPort(args.port);
     try host_socket.listen();
 
-    var p1_client_sock = try host_socket.accept();
-    defer p1_client_sock.close();
+    var terminate_server = std.atomic.Atomic(bool).init(false);
 
-    var p2_client_sock = try host_socket.accept();
-    defer p2_client_sock.close();
+    const server_cmds_handler_thread = try std.Thread.spawn(.{}, serverCmdsHandling, .{&terminate_server});
+    defer server_cmds_handler_thread.join();
 
-    const p1_out = p1_client_sock.writer();
-    const p1_in = p1_client_sock.reader();
+    while (!terminate_server.load(.Acquire)) {
+        var p1_sock = try host_socket.accept();
+        defer p1_sock.close();
 
-    const p2_out = p2_client_sock.writer();
-    const p2_in = p2_client_sock.reader();
+        var p2_sock = try host_socket.accept();
+        defer p2_sock.close();
+
+        playGame(p1_sock, p2_sock) catch |err| return switch (err) {
+            error.EndOfStream => continue,
+            else => err,
+        };
+    }
+}
+
+fn playGame(p1_sock: network.Socket, p2_sock: network.Socket) !void {
+    const p1_out = p1_sock.writer();
+    const p1_in = p1_sock.reader();
+
+    const p2_out = p2_sock.writer();
+    const p2_in = p2_sock.reader();
 
     var p1_points: u2 = 0;
     var p2_points: u2 = 0;
@@ -64,5 +78,33 @@ pub fn main() !void {
 
         try p2_out.writeInt(u8, p2_points, shared.endian);
         try p2_out.writeInt(u8, p1_points, shared.endian);
+    }
+}
+
+fn serverCmdsHandling(
+    p_terminate_server: *std.atomic.Atomic(bool),
+) void {
+    defer p_terminate_server.store(true, .Release);
+
+    var buffer: [128]u8 = undefined;
+    while (true) {
+        const user_input = std.io.getStdIn().reader().readUntilDelimiter(&buffer, '\n') catch |err| {
+            while (!std.debug.getStderrMutex().tryLock()) {}
+            defer std.debug.getStderrMutex().unlock();
+            switch (err) {
+                error.StreamTooLong => {},
+                else => std.io.getStdErr().writer().print("\nFailed to process command. Error: {s}.\n", .{@errorName(err)}) catch {},
+            }
+            continue;
+        };
+
+        if (user_input.len == 0) {} else if (std.mem.eql(u8, user_input, "TERMINATE")) {
+            break;
+        } else {
+            while (!std.debug.getStderrMutex().tryLock()) {}
+            defer std.debug.getStderrMutex().unlock();
+
+            std.io.getStdErr().writer().print("\nUnrecognized command '{s}'.\n", .{user_input}) catch {};
+        }
     }
 }
